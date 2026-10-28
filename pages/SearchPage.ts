@@ -4,13 +4,10 @@ import { expect, type Locator, type Page, type Response } from '@playwright/test
 export class SearchPage {
   readonly searchInput: Locator;
   readonly resultsCounter: Locator;
-  readonly saveSearchButton: Locator;
 
   constructor(readonly page: Page) {
     this.searchInput = page.getByRole('textbox', { name: 'Search all collections' });
     this.resultsCounter = page.locator('.searchHeader-counter');
-    // Icon-only button without an accessible name; its tooltip is "Save this search"
-    this.saveSearchButton = page.locator('.searchFilters__iconBtn').nth(1);
   }
 
   /** Waits for the next asset search request the UI sends (POST /images/search). */

@@ -12,19 +12,20 @@ exploration. I chose a small set of reliable tests over many fragile ones.
 
 | # | Test | Plan section | Priority | What it checks |
 |---|------|--------------|----------|----------------|
-| 1 | **Create** a saved search from text + Type filter "PDF documents" | 2.1.1 | Core | `POST /savedSearches` → **201** with `text`, `type=pdf` and `shared:false` in the payload; the search appears in the selected folder (*Personal Saved Searches*) and not in *Team Saved Searches* |
+| 1 | **Create** a personal saved search from text + Type filter "PDF documents" | 2.1.1 | Core | `POST /savedSearches` → **201** with `text`, `type=pdf` and `shared:false` in the payload; the search appears in *Personal Saved Searches* and not in *Team Saved Searches*. Picking a sub-group in "Save to" is not covered (see Kept manual) |
 | 2 | **Apply** a saved search | 2.1.2 | Core | Starting from an unfiltered library: the same asset ids as the original search, `text`/`type` in the URL, "guide" in the search bar, the "PDF documents" filter chip, and the same results counter |
 | 3 | **Persistence** after reload | 2.1.8 | Core | A search created in the UI is still in the list after a page reload |
 | 4 | **Rename** | 2.1.3 | Secondary | `PUT /savedSearches/:id/rename` → 200; the new name is shown and the old one is gone; after a reload, applying it returns the same assets |
 | 5 | **Delete** with confirmation | 2.1.4, 2.2.3 | Secondary | The "Delete saved search?" dialog shows the name; **Cancel** keeps the search; **Delete** → `DELETE` 200 and the search disappears, also after a reload |
-| 6 | **Name > 50 characters** (known bug) | 2.6.3, 8 | Bug | The server answers **400** ("must be ≤ 50 characters"), nothing is created, and **no message is shown** to the user. Marked `test.fail()`, see below |
+| 6a | **Name > 50 characters**: API contract | 2.6.3, 8 | Bug context | The server answers **400** ("must be ≤ 50 characters") and nothing is created. A regular test: it turns red as soon as this behaviour changes |
+| 6b | **Name > 50 characters**: user feedback (known bug) | 2.6.3, 8 | Bug | Expected: the field limits the name to 50 characters **or** a message explains the error. Today neither happens, so it is marked `test.fail()`, see below |
 
 ### Kept manual, and why
 
 | Area (plan section) | Why it is not automated |
 |---|---|
 | UI/UX, icon tooltips (2.2) | These need a person to judge them. An automated check of tooltip text adds maintenance cost and catches little. |
-| Favourites, move between folders, search within saved searches (2.1.5–7) | Lower priority (section 3). They are easy to add on top of the existing page object if regression needs them. |
+| Favourites, move between folders and sub-groups in "Save to", search within saved searches (2.1.5–7) | Lower priority (section 3). They are easy to add on top of the existing page object if regression needs them. |
 | Security: another user's searches, ID swapping (2.5) | Needs a second account and team setup. Sharing and permissions are out of scope (section 1). |
 | Performance (2.4) | A free trial with 6 assets gives numbers that mean nothing. This needs a large library and a dedicated tool. |
 | Cross-browser and mobile (2.7) | The suite runs on **Chromium only**. WebKit does not start on my machine without extra system libraries. Adding a browser is one entry in `projects` in [playwright.config.ts](playwright.config.ts). |
@@ -40,7 +41,7 @@ pages/
 tests/
   auth.setup.ts           logs in once (or reuses a saved session), writes storageState
   fixtures.ts             page objects, API helper for setup/cleanup, unique test names
-  saved-searches.spec.ts  the 6 tests
+  saved-searches.spec.ts  the tests from the table above
 scripts/
   save-session.mts        one-time manual login for Google / Microsoft SSO accounts
 docs/TEST_PLAN.md         Part 1
@@ -54,8 +55,11 @@ Design decisions:
 - **Test isolation.** Only the test that is *about* creation creates a search through the UI. Rename,
   delete and apply set up their data with `POST /savedSearches`, which is the same endpoint the UI
   calls. That way a broken Create dialog fails one test instead of five.
-- **Cleanup.** Every saved search a test creates, through the UI or the API, is tracked and deleted
-  through the API in fixture teardown, even when the test fails. Names are unique per run
+- **Cleanup.** An auto fixture listens to every successful `POST /savedSearches` the page sends and
+  records the new id. API-created searches are recorded *before* their status is asserted. Teardown
+  deletes them all through the API, even if a test fails halfway or the backend returns an unexpected
+  status. Teardown first tries every delete and only then reports failures, so one bad delete does not
+  leave the rest behind. Names are unique per run
   (`autotest-<label>-<timestamp>`), so a failed run never clashes with the next one.
 - **Personal, not shared.** Test searches are saved with "Share with my team" switched off. They don't
   show up for teammates, and sharing is out of scope.
@@ -67,18 +71,18 @@ Design decisions:
   backend wait for their exact request. One real flake I hit: after `reload()` the app starts its own
   library search, and the next "apply" picked up *that* response. `SearchPage.reload()` now waits for
   the initial search first.
-- **Known bug as `test.fail()`.** The test first checks the root cause, which passes today: 400 with
-  the 50-character message and nothing created. Then it asserts the *expected* behaviour, a visible
-  validation message. The suite stays green while the bug is open. When the bug is fixed, Playwright
-  reports "expected to fail but passed", which reminds you to remove `test.fail()`. One limitation:
-  `test.fail()` also accepts a failure in the root-cause checks, so if the API changes, look at this
-  test's report.
+- **Known bug: two tests, only one with `test.fail()`.** `test.fail()` treats *any* failure as
+  expected, so it wraps only the user-facing assertion (6b). That assertion accepts each realistic
+  fix: a `maxlength` on the field, client-side validation, or a server error shown in the UI. Any of
+  them makes Playwright report "expected to fail but passed", which reminds you to remove
+  `test.fail()`. The server contract (400, nothing created) lives in a separate, regular test (6a).
+  If the fix changes that behaviour, 6a turns red instead of hiding the change.
 - **Serial run** (`workers: 1`). All tests share one live account and one saved-searches tree.
   The run takes about 1.5 minutes.
 
 ## Running locally
 
-Requirements: Node.js 20.12+ (built-in `.env` loading) and a Pics.io account (a free trial works).
+Requirements: Node.js 22.18+ (`npm run auth` runs a `.mts` file with type annotations, which Node runs natively only from 22.18) and a Pics.io account (a free trial works).
 
 ```bash
 npm ci
@@ -112,7 +116,7 @@ npm run test:headed    # watch it run
 npm run report         # open the HTML report (traces, screenshots and video on failure)
 ```
 
-Expected result: `7 passed`, which is the login setup plus the 6 tests. Test 6 is listed with ✘ because it is an *expected* failure (`test.fail()`).
+Expected result: `8 passed`, which is the login setup plus the 7 tests. Test 6b is listed with ✘ because it is an *expected* failure (`test.fail()`).
 
 **CI.** [.github/workflows/playwright.yml](.github/workflows/playwright.yml) runs on manual trigger only
 (`workflow_dispatch`). The suite hits a live account, so it needs `PICSIO_EMAIL` / `PICSIO_PASSWORD`

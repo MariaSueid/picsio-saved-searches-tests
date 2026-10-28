@@ -5,18 +5,23 @@ export type SavedSearchSection = 'Favorites' | 'Team Saved Searches' | 'Personal
 /** Left "Saved searches" panel plus the "Create saved search" and "Delete saved search?" dialogs. */
 export class SavedSearchesPanel {
   readonly openButton: Locator;
+  readonly saveSearchButton: Locator;
   readonly filterInput: Locator;
   readonly dialog: Locator;
   readonly nameInput: Locator;
+  readonly submitButton: Locator;
   readonly shareCheckbox: Locator;
   readonly saveToTree: Locator;
 
   constructor(readonly page: Page) {
     this.openButton = page.locator('#button-search');
+    // Icon-only button in the search toolbar without an accessible name; its tooltip is "Save this search"
+    this.saveSearchButton = page.locator('.searchFilters__iconBtn').nth(1);
     this.filterInput = page.getByRole('textbox', { name: 'Search in saved searches' });
     // Pics.io dialogs are not role="dialog", the shared .simpleDialogBox container is the stable hook
     this.dialog = page.locator('.simpleDialogBox');
     this.nameInput = page.getByTestId('saveSearchDialogNameInput');
+    this.submitButton = this.dialog.getByRole('button', { name: 'Ok' });
     this.shareCheckbox = page.getByTestId('saveSearchShare');
     this.saveToTree = page.getByTestId('saveSearchTree');
   }
@@ -24,7 +29,7 @@ export class SavedSearchesPanel {
   async open() {
     // The app remembers the last opened panel, and clicking an already active tab collapses it
     await expect(this.openButton).toBeVisible();
-    if (!(await this.openButton.getAttribute('class'))?.includes('active')) await this.openButton.click();
+    if (!(await this.openButton.evaluate((el) => el.classList.contains('active')))) await this.openButton.click();
     await expect(this.section('Personal Saved Searches')).toBeVisible();
   }
 
@@ -45,15 +50,23 @@ export class SavedSearchesPanel {
     return this.section(section).locator(`li[role="treeitem"][data-id="${id}"]`);
   }
 
-  /** Fills and submits "Create saved search" as a personal (not shared) search. Returns the POST response. */
-  async create(name: string, { shared = false } = {}): Promise<Response> {
-    await this.page.locator('.searchFilters__iconBtn').nth(1).click(); // "Save this search"
+  /** Opens "Create saved search", picks personal/team and types the name, without submitting. */
+  async fillCreateDialog(name: string, { shared = false } = {}) {
+    await this.saveSearchButton.click();
     await expect(this.dialog.getByText('Create saved search')).toBeVisible();
     await this.setShared(shared);
     await this.nameInput.fill(name);
+  }
+
+  /** Fills and submits "Create saved search" as a personal (not shared) search. Returns the POST response. */
+  async create(name: string, { shared = false, responseTimeout = 15_000 } = {}): Promise<Response> {
+    await this.fillCreateDialog(name, { shared });
     const [response] = await Promise.all([
-      this.page.waitForResponse((r) => r.url().endsWith('/savedSearches') && r.request().method() === 'POST'),
-      this.dialog.getByRole('button', { name: 'Ok' }).click(),
+      this.page.waitForResponse(
+        (r) => r.url().endsWith('/savedSearches') && r.request().method() === 'POST',
+        { timeout: responseTimeout },
+      ),
+      this.submitButton.click(),
     ]);
     return response;
   }

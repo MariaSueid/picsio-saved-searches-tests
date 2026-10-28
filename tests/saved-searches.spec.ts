@@ -2,8 +2,8 @@ import { test, expect, GUIDE_PDF_SEARCH } from './fixtures';
 import { assetIds } from '../pages/SearchPage';
 
 test.describe('Saved searches', () => {
-  test('create: a search with text + PDF filter is saved to the selected folder @core', async ({
-    page, searchPage, savedSearches, savedSearchesApi, uniqueName,
+  test('create: a personal search with text + PDF filter lands in Personal, not Team @core', async ({
+    page, searchPage, savedSearches, uniqueName,
   }) => {
     const name = uniqueName('create');
 
@@ -20,8 +20,6 @@ test.describe('Saved searches', () => {
     const response = await savedSearches.create(name);
 
     expect(response.status()).toBe(201);
-    const body = await response.json();
-    savedSearchesApi.track(body._id);
     expect(response.request().postDataJSON()).toMatchObject({
       name,
       shared: false,
@@ -56,14 +54,13 @@ test.describe('Saved searches', () => {
   });
 
   test('persistence: a saved search created in the UI is still there after reload @core', async ({
-    searchPage, savedSearches, savedSearchesApi, uniqueName,
+    searchPage, savedSearches, uniqueName,
   }) => {
     const name = uniqueName('reload');
     await searchPage.open(GUIDE_PDF_SEARCH);
     await savedSearches.open();
     const response = await savedSearches.create(name);
     expect(response.status()).toBe(201);
-    savedSearchesApi.track((await response.json())._id);
     await expect(savedSearches.item(name)).toBeVisible();
 
     await searchPage.reload();
@@ -129,29 +126,44 @@ test.describe('Saved searches', () => {
     });
   });
 
-  test('edge case: a name longer than 50 characters shows a validation error', async ({
+  test('edge case: the API rejects a name longer than 50 characters and nothing is created', async ({
     searchPage, savedSearches,
+  }) => {
+    // Documents today's server contract. If it changes (e.g. the UI starts truncating to 50 chars and the
+    // request succeeds, or client-side validation stops the request), this test turns red on purpose.
+    const name = `autotest-long-${'x'.repeat(40)}`; // 54 characters
+    await searchPage.open(GUIDE_PDF_SEARCH);
+    await savedSearches.open();
+
+    const response = await savedSearches.create(name, { responseTimeout: 10_000 });
+
+    expect(response.status()).toBe(400);
+    expect((await response.json()).msg).toContain('less than or equal to 50 characters');
+    await expect(savedSearches.item(name)).toHaveCount(0);
+  });
+
+  test('edge case: the user is told that a name is longer than 50 characters', async ({
+    page, searchPage, savedSearches,
   }) => {
     test.info().annotations.push({
       type: 'known bug',
       description:
-        'Name field has no limit, the server rejects > 50 chars with 400 and the dialog just closes with no message. ' +
-        'See docs/TEST_PLAN.md, section 8. Remove test.fail() once fixed.',
+        'No length limit in the name field; the server rejects > 50 chars with 400 and the dialog just closes ' +
+        'with no message. See docs/TEST_PLAN.md, section 8. Remove test.fail() once fixed.',
     });
     test.fail();
 
     const name = `autotest-long-${'x'.repeat(40)}`; // 54 characters
     await searchPage.open(GUIDE_PDF_SEARCH);
     await savedSearches.open();
+    await savedSearches.fillCreateDialog(name);
 
-    const response = await savedSearches.create(name);
+    // Expected behaviour from the plan: the field limits the name to 50 characters OR a message explains it.
+    // Each of these fixes makes the test pass, so Playwright reports "expected to fail but passed".
+    if ((await savedSearches.nameInput.inputValue()).length <= 50) return;
 
-    // Confirms the bug's root cause; these pass today
-    expect(response.status()).toBe(400);
-    expect((await response.json()).msg).toContain('less than or equal to 50 characters');
-    await expect(savedSearches.item(name)).toHaveCount(0);
-
-    // Expected behaviour: the user is told why the search was not saved. Fails today -> test.fail()
-    await expect(searchPage.page.getByText(/50 characters/i)).toBeVisible({ timeout: 5_000 });
+    const message = savedSearches.dialog.getByText(/\b50\b/).or(page.locator('.Toastify__toast--error'));
+    if (!(await message.isVisible())) await savedSearches.submitButton.click({ timeout: 5_000 });
+    await expect(message).toBeVisible({ timeout: 5_000 });
   });
 });
