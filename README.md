@@ -73,7 +73,9 @@ Design decisions:
   the initial search first.
 - **Known bug: two tests, only one with `test.fail()`.** `test.fail()` treats *any* failure as
   expected, so it wraps only the user-facing assertion (6b). That assertion accepts each realistic
-  fix: a `maxlength` on the field, client-side validation, or a server error shown in the UI. Any of
+  fix: a `maxlength` on the field, client-side validation, or a server error shown in the UI. Only a
+  message that mentions the limit counts, so an unrelated error toast such as "Seems you are offline"
+  doesn't. The test also passes when a fix shows a dialog hint and a toast at the same time. Any of
   them makes Playwright report "expected to fail but passed", which reminds you to remove
   `test.fail()`. The server contract (400, nothing created) lives in a separate, regular test (6a).
   If the fix changes that behaviour, 6a turns red instead of hiding the change.

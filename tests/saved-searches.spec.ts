@@ -162,7 +162,13 @@ test.describe('Saved searches', () => {
     // Each of these fixes makes the test pass, so Playwright reports "expected to fail but passed".
     if ((await savedSearches.nameInput.inputValue()).length <= 50) return;
 
-    const message = savedSearches.dialog.getByText(/\b50\b/).or(page.locator('.Toastify__toast--error'));
+    // Only a message about the limit counts: an unrelated error toast (e.g. "Seems you are offline") must not.
+    // .first(): a fix may show both a dialog hint and a toast, which would be a strict mode violation,
+    // and test.fail() would silently accept that as the "expected" failure.
+    const message = savedSearches.dialog
+      .getByText(/\b50\b/)
+      .or(page.locator('.Toastify__toast--error', { hasText: /\b50\b/ }))
+      .first();
     if (!(await message.isVisible())) await savedSearches.submitButton.click({ timeout: 5_000 });
     await expect(message).toBeVisible({ timeout: 5_000 });
   });
